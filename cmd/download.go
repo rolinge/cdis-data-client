@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -32,7 +33,8 @@ func RequestDownload(resp *http.Response) *http.Response {
 
 	jwt.DecodeJsonFromString(str, &msg)
 	if msg.Url == "" {
-		log.Fatalf("Can not get url from " + str)
+		fmt.Println("Can not get url from " + str)
+		return nil
 	}
 
 	presignedDownloadURL := msg.Url
@@ -46,6 +48,38 @@ func RequestDownload(resp *http.Response) *http.Response {
 	return respDown
 }
 
+func DownloadAFile(uuid string) {
+	/*
+		Download a file from given an uuid
+	*/
+
+	request := new(jwt.Request)
+	configure := new(jwt.Configure)
+	function := new(jwt.Functions)
+
+	function.Config = configure
+	function.Request = request
+
+	endPointPostfix := "/user/data/download/" + uuid
+
+	respDown := function.DoRequestWithSignedHeader(RequestDownload, profile, "", endPointPostfix)
+
+	if respDown == nil {
+		fmt.Println("Error !!!")
+	} else {
+		out, err := os.Create(file_path)
+		if err != nil {
+			log.Fatalf(err.Error())
+		}
+		defer out.Close()
+		defer respDown.Body.Close()
+		_, err = io.Copy(out, respDown.Body)
+		if err != nil {
+			panic(err)
+		}
+	}
+}
+
 // represent to download command
 var downloadCmd = &cobra.Command{
 	Use:   "download",
@@ -54,42 +88,37 @@ var downloadCmd = &cobra.Command{
 Examples: ./cdis-data-client download --profile user1 --uuid 206dfaa6-bcf1-4bc9-b2d0-77179f0f48fc --file=~/Documents/file_to_download.json 
 `,
 	Run: func(cmd *cobra.Command, args []string) {
-
-		if file_path == "" {
-			log.Fatalf("Need to provide --file option !!!")
-		}
-
-		if uuid == "" {
-			log.Fatalf("Need to provide --uuid option !!!")
-		}
-
-		request := new(jwt.Request)
-		configure := new(jwt.Configure)
-		function := new(jwt.Functions)
-
-		function.Config = configure
-		function.Request = request
-
-		endPointPostfix := "/user/data/download/" + uuid
-
-		respDown := function.DoRequestWithSignedHeader(RequestDownload, profile, "", endPointPostfix)
-
-		if respDown == nil {
-			fmt.Println("Error !!!")
-		} else {
-			out, err := os.Create(file_path)
-			if err != nil {
-				log.Fatalf(err.Error())
+		if uuid_list_file == "" {
+			if file_path == "" {
+				log.Fatalf("Need to provide --file option !!!")
 			}
-			defer out.Close()
-			defer respDown.Body.Close()
-			_, err = io.Copy(out, respDown.Body)
+
+			if uuid == "" {
+				log.Fatalf("Need to provide --uuid option !!!")
+			}
+		} else {
+			if save_dir == "" {
+				log.Fatalf("Need to provide --out option !!!")
+			}
+		}
+
+		if uuid_list_file == "" {
+			DownloadAFile(uuid)
+		} else {
+			content, err := ioutil.ReadFile(uuid_list_file)
 			if err != nil {
 				panic(err)
 			}
-
-			fmt.Println("Done!!!")
+			lines := strings.Split(string(content), "\n")
+			for i := 0; i < len(lines); i++ {
+				words := strings.Split(lines[i], "\t")
+				file_path = save_dir + "/" + uuid
+				println("Download " + words[0])
+				DownloadAFile(words[0])
+			}
 		}
+
+		fmt.Println("Done!!!")
 
 	},
 }

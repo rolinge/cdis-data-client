@@ -136,6 +136,14 @@ func (r *Request) GetPresignedURL(host *url.URL, endpointPostPrefix string, acce
 	if err != nil {
 		panic(err)
 	}
+	if resp.StatusCode == 404 {
+		apiEndPoint = host.Scheme + "://" + host.Host + "/index" + endpointPostPrefix
+		resp, err = r.SignedRequest("GET", apiEndPoint, nil, accessKey)
+		if err != nil {
+			panic(err)
+		}
+	}
+
 	if resp.StatusCode != 200 && resp.StatusCode != 401 && resp.StatusCode != 404 {
 		log.Fatalf("Unexpected error %d, %s\n", resp.StatusCode, ResponseToString(resp))
 	}
