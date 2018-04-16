@@ -90,7 +90,7 @@ Examples: ./cdis-data-client download --profile user1 --uuid 206dfaa6-bcf1-4bc9-
 	Run: func(cmd *cobra.Command, args []string) {
 		if uuid_list_file == "" {
 			if file_path == "" {
-				log.Fatalf("Need to provide --file option !!!")
+				log.Fatalf("Need to provide --file or --uuid_bag options !!!")
 			}
 
 			if uuid == "" {
@@ -113,6 +113,7 @@ Examples: ./cdis-data-client download --profile user1 --uuid 206dfaa6-bcf1-4bc9-
 			for i := 0; i < len(lines); i++ {
 				words := strings.Split(lines[i], "\t")
 				file_path = save_dir + "/" + words[0]
+				print("\n=======================================")
 				println("Download " + words[0])
 				DownloadAFile(words[0])
 			}
