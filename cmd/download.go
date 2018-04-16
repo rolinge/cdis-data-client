@@ -112,7 +112,7 @@ Examples: ./cdis-data-client download --profile user1 --uuid 206dfaa6-bcf1-4bc9-
 			lines := strings.Split(string(content), "\n")
 			for i := 0; i < len(lines); i++ {
 				words := strings.Split(lines[i], "\t")
-				file_path = save_dir + "/" + uuid
+				file_path = save_dir + "/" + words[0]
 				println("Download " + words[0])
 				DownloadAFile(words[0])
 			}
