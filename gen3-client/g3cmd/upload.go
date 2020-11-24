@@ -132,13 +132,20 @@ func init() {
 					logs.AddToFailedLog(fileInfo.FilePath, fileInfo.Filename, fileInfo.FileMetadata, guid, 0, false, true)
 
 					furObject := commonUtils.FileUploadRequestObject{FilePath: fileInfo.FilePath, Filename: fileInfo.Filename, GUID: guid, PresignedURL: respURL}
-					furObject, err = GenerateUploadRequest(furObject, file)
-					if err != nil {
-						file.Close()
-						log.Printf("Error occurred during request generation: %s\n", err.Error())
-						continue
-					}
+					if strings.Contains(furObject.PresignedURL, "blob.core.windows.net") {
+						err = uploadFiletoAzure(furObject, 0)
+					}else {
+						furObject, err = GenerateUploadRequest(furObject, file)
+						if err != nil {
+							file.Close()
+							log.Printf("Error occurred during request generation: %s\n", err.Error())
+							continue
+						}
+
 					err = uploadFile(furObject, 0)
+					
+					}
+					
 					if err != nil {
 						log.Println(err.Error())
 					} else {
