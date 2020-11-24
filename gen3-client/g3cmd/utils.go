@@ -568,7 +568,10 @@ func uploadFiletoAzure(furObject commonUtils.FileUploadRequestObject, retryCount
 	azureURL := furObject.PresignedURL
 
 	file, err := os.Open(furObject.FilePath)
-	handleErrors(err)
+	if err != nil {
+		log.Println("File open error occurred when validating file path: " + err.Error())
+		return nil
+	}
 
 	fi, err := file.Stat()
 
@@ -602,12 +605,12 @@ func uploadFiletoAzure(furObject commonUtils.FileUploadRequestObject, retryCount
 	furObject.Request = req
 
 	if err != nil {
-		logs.AddToFailedLog(furObject.FilePath, furObject.Filename, furObject.GUID, retryCount, false, true)
+		logs.AddToFailedLog(furObject.FilePath, furObject.Filename, furObject.FileMetadata, furObject.GUID, retryCount, false, true)
 		furObject.Bar.Finish()
 		return errors.New("Error occurred during upload: " + err.Error())
 	}
 	if resp.StatusCode != 201 {
-		logs.AddToFailedLog(furObject.FilePath, furObject.Filename, furObject.GUID, retryCount, false, true)
+		logs.AddToFailedLog(furObject.FilePath, furObject.Filename, furObject.FileMetadata, furObject.GUID, retryCount, false, true)
 		furObject.Bar.Finish()
 		return errors.New("Upload request got a non-200 response with status code " + strconv.Itoa(resp.StatusCode))
 	}
