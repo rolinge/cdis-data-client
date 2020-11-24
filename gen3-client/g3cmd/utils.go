@@ -563,6 +563,62 @@ func uploadFile(furObject commonUtils.FileUploadRequestObject, retryCount int) e
 	return nil
 }
 
+func uploadFiletoAzure(furObject commonUtils.FileUploadRequestObject, retryCount int) error {
+	log.Println("Uploading data to Azure...")
+	azureURL := furObject.PresignedURL
+
+	file, err := os.Open(furObject.FilePath)
+	handleErrors(err)
+
+	fi, err := file.Stat()
+
+	bar := pb.New64(fi.Size()).SetUnits(pb.U_BYTES).SetRefreshRate(time.Millisecond * 10).Prefix(furObject.Filename + " ")
+	pr, pw := io.Pipe()
+
+	go func() {
+		var writer io.Writer
+		defer pw.Close()
+		defer file.Close()
+
+		writer = io.MultiWriter(pw, bar)
+		if _, err = io.Copy(writer, file); err != nil {
+			err = errors.New("io.Copy error: " + err.Error() + "\n")
+		}
+		if err = pw.Close(); err != nil {
+			err = errors.New("Pipe writer close error: " + err.Error() + "\n")
+		}
+	}()
+
+	furObject.Bar = bar
+	furObject.Bar.Start()
+
+	req, err := http.NewRequest(http.MethodPut, azureURL, pr)
+	// Set blob type as 'BlockBlob' in HTTP headercd
+	req.Header.Add("x-ms-blob-type", "BlockBlob")
+	req.ContentLength = fi.Size()
+	client := &http.Client{}
+	resp, err := client.Do(req)
+
+	furObject.Request = req
+
+	if err != nil {
+		logs.AddToFailedLog(furObject.FilePath, furObject.Filename, furObject.GUID, retryCount, false, true)
+		furObject.Bar.Finish()
+		return errors.New("Error occurred during upload: " + err.Error())
+	}
+	if resp.StatusCode != 201 {
+		logs.AddToFailedLog(furObject.FilePath, furObject.Filename, furObject.GUID, retryCount, false, true)
+		furObject.Bar.Finish()
+		return errors.New("Upload request got a non-200 response with status code " + strconv.Itoa(resp.StatusCode))
+	}
+
+	furObject.Bar.Finish()
+	log.Printf("Successfully uploaded file \"%s\" to GUID %s.\n", furObject.FilePath, furObject.GUID)
+	logs.DeleteFromFailedLog(furObject.FilePath, true)
+	logs.WriteToSucceededLog(furObject.FilePath, furObject.GUID, false)
+	return nil
+}
+
 func getNumberOfWorkers(numParallel int, inputSliceLen int) int {
 	workers := numParallel
 	if workers < 1 || workers > inputSliceLen {
