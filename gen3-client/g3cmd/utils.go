@@ -2,6 +2,7 @@ package g3cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -17,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Azure/azure-storage-blob-go/azblob"
 	"github.com/uc-cdis/gen3-client/gen3-client/commonUtils"
 	"github.com/uc-cdis/gen3-client/gen3-client/logs"
 
@@ -451,9 +454,11 @@ func validateFilePath(filePaths []string, forceMultipart bool) ([]string, []stri
 				log.Printf("The file size of %s has exceeded the limit allowed and cannot be uploaded. The maximum allowed file size is %s\n", fi.Name(), FormatSize(MultipartFileSizeLimit))
 			} else if fi.Size() > int64(fileSizeLimit) {
 				multipartFilePaths = append(multipartFilePaths, filePath)
-			} else {
-				singlepartFilePaths = append(singlepartFilePaths, filePath)
 			}
+
+			// For Azure, we'll always upload file through Single Part upload
+			singlepartFilePaths = append(singlepartFilePaths, filePath)
+
 		}()
 	}
 	return singlepartFilePaths, multipartFilePaths
@@ -565,54 +570,34 @@ func uploadFile(furObject commonUtils.FileUploadRequestObject, retryCount int) e
 
 func uploadFiletoAzure(furObject commonUtils.FileUploadRequestObject, retryCount int) error {
 	log.Println("Uploading data to Azure...")
-	azureURL := furObject.PresignedURL
+	azureSASURL := furObject.PresignedURL
 
 	file, err := os.Open(furObject.FilePath)
-	handleErrors(err)
-
-	fi, err := file.Stat()
-
-	bar := pb.New64(fi.Size()).SetUnits(pb.U_BYTES).SetRefreshRate(time.Millisecond * 10).Prefix(furObject.Filename + " ")
-	pr, pw := io.Pipe()
-
-	go func() {
-		var writer io.Writer
-		defer pw.Close()
-		defer file.Close()
-
-		writer = io.MultiWriter(pw, bar)
-		if _, err = io.Copy(writer, file); err != nil {
-			err = errors.New("io.Copy error: " + err.Error() + "\n")
-		}
-		if err = pw.Close(); err != nil {
-			err = errors.New("Pipe writer close error: " + err.Error() + "\n")
-		}
-	}()
-
-	furObject.Bar = bar
-	furObject.Bar.Start()
-
-	req, err := http.NewRequest(http.MethodPut, azureURL, pr)
-	// Set blob type as 'BlockBlob' in HTTP headercd
-	req.Header.Add("x-ms-blob-type", "BlockBlob")
-	req.ContentLength = fi.Size()
-	client := &http.Client{}
-	resp, err := client.Do(req)
-
-	furObject.Request = req
-
 	if err != nil {
-		logs.AddToFailedLog(furObject.FilePath, furObject.Filename, furObject.GUID, retryCount, false, true)
-		furObject.Bar.Finish()
+		log.Println("File open error occurred when validating file path: " + err.Error())
+		return nil
+	}
+
+	ctx := context.Background() // This example uses a never-expiring context
+	// When someone receives the URL, they access the SAS-protected resource with code like this:
+	u, _ := url.Parse(azureSASURL)
+
+	// Create an BlobURL object that wraps the blob URL (and its SAS) and a pipeline.
+	// When using a SAS URLs, anonymous credentials are required.
+	newblockblobURL := azblob.NewBlockBlobURL(*u, azblob.NewPipeline(azblob.NewAnonymousCredential(), azblob.PipelineOptions{}))
+
+	// The high-level API UploadFileToBlockBlob function uploads blocks in parallel for optimal performance, and can handle large files as well.
+	// This function calls PutBlock/PutBlockList for files larger 256 MBs, and calls PutBlob for any file smaller
+	_, err = azblob.UploadFileToBlockBlob(ctx, file, newblockblobURL, azblob.UploadToBlockBlobOptions{
+		BlockSize:   8 * 1024 * 1024,
+		Parallelism: 16})
+	if err != nil {
+		logs.AddToFailedLog(furObject.FilePath, furObject.Filename, furObject.FileMetadata, furObject.GUID, retryCount, false, true)
+		file.Close()
 		return errors.New("Error occurred during upload: " + err.Error())
 	}
-	if resp.StatusCode != 201 {
-		logs.AddToFailedLog(furObject.FilePath, furObject.Filename, furObject.GUID, retryCount, false, true)
-		furObject.Bar.Finish()
-		return errors.New("Upload request got a non-200 response with status code " + strconv.Itoa(resp.StatusCode))
-	}
 
-	furObject.Bar.Finish()
+	file.Close()
 	log.Printf("Successfully uploaded file \"%s\" to GUID %s.\n", furObject.FilePath, furObject.GUID)
 	logs.DeleteFromFailedLog(furObject.FilePath, true)
 	logs.WriteToSucceededLog(furObject.FilePath, furObject.GUID, false)

@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/uc-cdis/gen3-client/gen3-client/commonUtils"
@@ -69,6 +70,7 @@ func init() {
 			}
 			fmt.Println()
 
+			fileUploadToAzure := false
 			singlepartFilePaths, multipartFilePaths := validateFilePath(filePaths, forceMultipart)
 
 			if batch {
@@ -132,9 +134,11 @@ func init() {
 					logs.AddToFailedLog(fileInfo.FilePath, fileInfo.Filename, fileInfo.FileMetadata, guid, 0, false, true)
 
 					furObject := commonUtils.FileUploadRequestObject{FilePath: fileInfo.FilePath, Filename: fileInfo.Filename, GUID: guid, PresignedURL: respURL}
+					// check if PresignedURL generated is for Azure
 					if strings.Contains(furObject.PresignedURL, "blob.core.windows.net") {
+						fileUploadToAzure = true
 						err = uploadFiletoAzure(furObject, 0)
-					}else {
+					} else if fi.Size() < int64(FileSizeLimit) && !forceMultipart {
 						furObject, err = GenerateUploadRequest(furObject, file)
 						if err != nil {
 							file.Close()
@@ -142,10 +146,10 @@ func init() {
 							continue
 						}
 
-					err = uploadFile(furObject, 0)
-					
+						err = uploadFile(furObject, 0)
+
 					}
-					
+
 					if err != nil {
 						log.Println(err.Error())
 					} else {
@@ -155,8 +159,8 @@ func init() {
 				}
 			}
 
-			// multipart upload for large files here
-			if len(multipartFilePaths) > 0 {
+			// multipart upload is specific to AWS S3 and for large files > 5 gb OR if forceMultipart set to 'true'
+			if !fileUploadToAzure && len(multipartFilePaths) > 0 {
 				// NOTE(@mpingram) - For the moment Shepherd doesn't support multipart uploads.
 				// Throw an error if Shepherd is enabled and user attempts to multipart upload.
 				cred := conf.ParseConfig(profile)
